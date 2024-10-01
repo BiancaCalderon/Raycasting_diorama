@@ -1,30 +1,29 @@
+use image::{GenericImageView, RgbaImage};
 use crate::color::Color;
 
-#[derive(Debug, Clone)] // Añade Debug y Clone aquí
 pub struct Texture {
-    pub data: Vec<u8>, // Datos de la textura
-    pub width: u32,
-    pub height: u32,
+    pub image: RgbaImage,
 }
 
 impl Texture {
-    pub fn new(image_path: &str) -> Texture {
-        let img = image::open(image_path).expect("Failed to load texture");
-        let img = img.to_rgba8();
+    pub fn new(file_path: &str) -> Self {
+        let img = image::open(file_path).expect("Failed to load texture image");
         let (width, height) = img.dimensions();
-        let data = img.into_raw(); // Convierte la imagen a un vector de bytes
-        Texture { data, width, height }
+        let rgba_image = img.to_rgba8(); // Convierte a RgbaImage
+        Texture {
+            image: rgba_image,
+        }
     }
 
     pub fn get_color(&self, u: f32, v: f32) -> Color {
-        // Convertir coordenadas UV a índices de píxel
-        let x = (u * self.width as f32) as usize % self.width as usize;
-        let y = (v * self.height as f32) as usize % self.height as usize;
-        let index = (y * self.width as usize + x) * 4; // 4 para RGBA
-        Color::new(
-            self.data[index],
-            self.data[index + 1],
-            self.data[index + 2],
-        )
+        let width = self.image.width() as f32;
+        let height = self.image.height() as f32;
+
+        // Convertir coordenadas UV a píxeles
+        let x = (u * width).clamp(0.0, width - 1.0) as u32;
+        let y = (v * height).clamp(0.0, height - 1.0) as u32;
+
+        let pixel = self.image.get_pixel(x, y);
+        Color::new(pixel[0], pixel[1], pixel[2]) // Asumiendo que Color tiene un constructor que acepta RGB
     }
 }
