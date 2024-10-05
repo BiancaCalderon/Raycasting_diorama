@@ -1,31 +1,44 @@
 use crate::color::Color;
+use crate::texture::Texture;
 
 #[derive(Clone, Debug)]
 pub struct Material {
-    pub color: Color,            // Color of the material (e.g., green for grass)
-    pub shininess: f32,          // Specular shininess
-    pub properties: [f32; 4],    // Material properties: [diffuse, specular, reflectivity, transparency]
-    pub refractive_index: f32,   // Refractive index, useful for materials like glass or water
+    pub color: Color,
+    pub shininess: f32,
+    pub properties: [f32; 4],
+    pub refractive_index: f32,
+    pub texture: Option<Texture>,
 }
 
-  impl Material {
-    pub const fn new(color: Color, shininess: f32, properties: [f32; 4], refractive_index: f32) -> Self {
+impl Material {
+    pub fn new(color: Color, shininess: f32, properties: [f32; 4], refractive_index: f32) -> Self {
         Material {
             color,
             shininess,
             properties,
             refractive_index,
+            texture: None,
         }
     }
-
-
+ 
     // Method to create a black material with default values
     pub fn black() -> Self {
         Material {
             color: Color::new(0, 0, 0),    // Use integer values for Color
             shininess: 0.0,                 // Default shininess
             properties: [0.0, 0.0, 0.0, 0.0], // Default properties (all set to 0)
-            refractive_index: 1.0,          // Default refractive index (e.g., for air)
+            refractive_index: 1.0, 
+            texture: None,         // Default refractive index (e.g., for air)
+        }
+    }
+
+    pub fn with_texture(texture: Texture, shininess: f32, properties: [f32; 4], refractive_index: f32) -> Self {
+        Material {
+            color: Color::new(255, 255, 255), // Color base blanco
+            shininess,
+            properties,
+            refractive_index,
+            texture: Some(texture),
         }
     }
 

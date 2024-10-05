@@ -26,9 +26,9 @@ impl Intersect {
         Intersect {
             point: Vec3::zeros(),
             normal: Vec3::zeros(),
-            distance: 0.0,
-            is_intersecting: false,
             material: Material::black(),
+            distance: 0.0,
+            is_intersecting: false
         }
     }
 }

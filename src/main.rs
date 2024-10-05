@@ -22,6 +22,8 @@ use crate::cube::Cube;
 use crate::material::Material;
 use texture::Texture;
 
+extern crate image;
+
 const ORIGIN_BIAS: f32 = 1e-4;
 const SKYBOX_COLOR: Color = Color::new(68, 142, 228);
 
@@ -114,23 +116,61 @@ pub fn cast_ray(
         return SKYBOX_COLOR;
     }
 
+    fn calculate_uv(intersect: &Intersect) -> (f64, f64) {
+        // Determinar qué cara del cubo estamos renderizando
+        let normal = intersect.normal;
+        let point = intersect.point;
+
+        let (u, v) = if normal.y.abs() > 0.99 {
+            // Cara superior o inferior
+            (point.x.abs() % 1.0, point.z.abs() % 1.0)
+        } else if normal.x.abs() > 0.99 {
+            // Cara lateral (izquierda o derecha)
+            (point.z.abs() % 1.0, point.y.abs() % 1.0)
+        } else {
+            // Cara frontal o trasera
+            (point.x.abs() % 1.0, point.y.abs() % 1.0)
+        };
+
+        (u as f64, v as f64)
+    }
+    
+
+    let material_color = if let Some(texture) = &intersect.material.texture {
+        let uv = calculate_uv(&intersect);
+        let u = uv.0.fract();
+        let v = uv.1.fract();
+        texture.get_color(u as f32, v as f32)
+    } else {
+        intersect.material.color
+    };
+    
+    // Intensity of the light hitting the object
     let light_dir = (light.position - intersect.point).normalize();
     let view_dir = (ray_origin - intersect.point).normalize();
     let reflect_dir = reflect(&-light_dir, &intersect.normal).normalize();
-
-    // Calcula la intensidad de la sombra
+    
     let shadow_intensity = cast_shadow(&intersect, light, objects);
     let light_intensity = light.intensity * (1.0 - shadow_intensity);
+    
+    // Determinar si el material tiene una textura
+    let has_texture = intersect.material.texture.is_some();
 
-    // Intensidad difusa
-    let diffuse_intensity = intersect.normal.dot(&light_dir).max(0.0).min(1.0);
-    let diffuse = intersect.material.color * intersect.material.properties[0] * diffuse_intensity * light_intensity;
+    // Calcular el color base
+    let base_color = if has_texture {
+        material_color // Usar el color de la textura sin modificar
+    } else {
+        // Aplicar iluminación solo para materiales sin textura
+        let diffuse_intensity = intersect.normal.dot(&light_dir).max(0.0).min(1.0);
+        let diffuse = Color::black() * intersect.material.properties[0] * diffuse_intensity * light_intensity;
+        
+        let specular_intensity = view_dir.dot(&reflect_dir).max(0.0).powf(intersect.material.shininess);
+        let specular = light.color * intersect.material.properties[1] * specular_intensity * light_intensity;
+        
+        diffuse + specular
+    };
 
-    // Intensidad especular
-    let specular_intensity = view_dir.dot(&reflect_dir).max(0.0).powf(intersect.material.shininess);
-    let specular = light.color * intersect.material.properties[1] * specular_intensity * light_intensity;
-
-    // Color reflejado
+    // Reflected color
     let mut reflect_color = Color::black();
     let reflectivity = intersect.material.properties[2];
     if reflectivity > 0.0 {
@@ -138,8 +178,8 @@ pub fn cast_ray(
         let reflect_origin = offset_origin(&intersect, &reflect_dir);
         reflect_color = cast_ray(&reflect_origin, &reflect_dir, objects, light, depth + 1);
     }
-
-    // Color refractado
+    
+    // Refracted color
     let mut refract_color = Color::black();
     let transparency = intersect.material.properties[3];
     if transparency > 0.0 {
@@ -147,11 +187,15 @@ pub fn cast_ray(
         let refract_origin = offset_origin(&intersect, &refract_dir);
         refract_color = cast_ray(&refract_origin, &refract_dir, objects, light, depth + 1);
     }
+    
+    // Combinar los colores
+    if has_texture {
+        base_color * (1.0 - reflectivity - transparency) + (reflect_color * reflectivity) + (refract_color * transparency)
+    } else {
+        base_color + (reflect_color * reflectivity) + (refract_color * transparency)
+    }
 
-    // Combinación de los colores difuso, especular, reflejado y refractado
-    (diffuse + specular) * (1.0 - reflectivity - transparency) + (reflect_color * reflectivity) + (refract_color * transparency)
 }
-
 
 pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, light: &Light) {
     let width = framebuffer.width as f32;
@@ -202,6 +246,7 @@ pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, 
         framebuffer.point(x as usize, y as usize);
     }
 }
+
 fn main() {
     let window_width = 800;
     let window_height = 600;
@@ -221,47 +266,55 @@ fn main() {
     window.set_position(500, 500);
     window.update();
 
-    let light = Light::new(
-        Vec3::new(1.0, 1.0, 5.0),
-        Color::new(255, 255, 255),
-        1.0
+    fn load_texture(file_path: &str) -> Texture {
+        match Texture::new(file_path) {
+            Ok(texture) => texture,
+            Err(e) => {
+                eprintln!("Error al cargar la textura {}: {}", file_path, e);
+                // Aquí podrías devolver una textura por defecto o pánico, dependiendo de tus necesidades
+                panic!("No se pudo cargar la textura");
+            }
+        }
+    }
+
+    let obsidian_texture  = load_texture("assets/obsidian.jpg"); // Carga la textura de obsidiana
+    let purple_texture  = load_texture("assets/purple.jpg"); // Carga la textura púrpura
+    let grass_texture = load_texture("assets/grass.jpg");
+
+    let obsidian_material = Material::with_texture(
+        obsidian_texture, // Texture para obsidian
+        10.0,            // Brillo
+        [0.1, 0.9, 0.1, 0.0], // Propiedades
+        2.0               // Índice de refracción
     );
 
+    let purple_material = Material::with_texture(
+        purple_texture,   // Texture para purple
+        10.0,            // Brillo
+        [0.1, 0.9, 0.1, 0.0], // Propiedades
+        1.0               // Índice de refracción
+    );
+
+
     // Define el material de césped
-    const GRASS: Material = Material::new(
-        Color::new(0, 255, 0),  // Color verde
+    let grass = Material::with_texture(
+        grass_texture,  // Color verde
         50.0,                   // Ajuste el brillo si es necesario
         [0.8, 0.2, 0.0, 0.0],   // Ajusta las propiedades: difuso, especular, reflectividad, transparencia
         1.0
     );
 
-    // Material para Obsidian
-    const OBSIDIAN: Material = Material::new(
-        Color::new(0, 0, 0),     // Color negro
-        100.0,                   // Ajuste el brillo (puede ser más alto para reflejar más luz)
-        [0.1, 0.9, 0.1, 0.0],    // Propiedades: difuso, especular, reflectividad, transparencia
-        1.0
-    );
-
-    // Material para Purple
-    const PURPLE: Material = Material::new(
-        Color::new(128, 0, 128),     // Color morado
-        100.0,                        // Ajuste el brillo
-        [0.6, 0.9, 0.6, 0.0],        // Propiedades: difuso, especular, reflectividad, transparencia
-        2.0
-    );
-
-    // Material para ROCK
-    const ROCK: Material = Material::new(
+    // Material para rock
+    let rock: Material = Material::new(
         Color::new(169, 169, 169), // Color gris (Rocoso)
-        50.0,                      // Ajuste el brillo
+        100.0,                      // Ajuste el brillo
         [0.6, 0.6, 0.6, 0.0],      // Propiedades: difuso, especular, reflectividad, transparencia
         0.0
     );
 
-    // Material para LAVA
-    const LAVA: Material = Material::new(
-        Color::new(255, 69, 0), // Color naranja brillante (Lava)
+    // Material para lava
+    let lava: Material = Material::new(
+        Color::new(255, 69, 0), // Color naranja brillante (lava)
         100.0,                   // Ajuste el brillo
         [0.9, 0.3, 0.0, 0.5],   // Propiedades: difuso, especular, reflectividad, transparencia
         0.0                     // Otras propiedades si es necesario
@@ -269,60 +322,66 @@ fn main() {
 
     
     // Agregar una luz
-    let light = Light::new(Vec3::new(2.8, 1.0, -3.0), Color::new(255, 165, 0), 1.5);
+    let light = Light::new(Vec3::new(1.5, 0.5, -4.0), Color::new(255, 200, 100), 2.0);
 
-let delta_y = 1.5; // Desplazamiento del portal hacia arriba
-let delta_z = 1.0; // Desplazamiento del portal hacia adelante
+    let delta_y = 1.5; // Desplazamiento del portal hacia arriba
+    let delta_z = 1.0; // Desplazamiento del portal hacia adelante
 
-let objects = [
-    // Base con césped (desplazada hacia abajo)
-    Cube { min: Vec3::new(-3.0, -0.5, -3.0), max: Vec3::new(3.0, -0.2, 3.0), material: GRASS }, // Base de césped
+    let objects = [
+        // Base con césped (desplazada hacia abajo)
+        Cube { min: Vec3::new(-3.0, -0.5, -3.0), max: Vec3::new(3.0, -0.2, 3.0), material: grass }, // Base de césped
 
-     // Lava en las esquinas de la base
-     Cube { min: Vec3::new(-3.2, -0.5, -3.2), max: Vec3::new(-2.8, 0.0, -2.8), material: LAVA }, // Esquina inferior izquierda
-     Cube { min: Vec3::new(2.8, -0.5, -3.2), max: Vec3::new(3.2, 0.0, -2.8), material: LAVA },  // Esquina inferior derecha
-     Cube { min: Vec3::new(-3.2, -0.5, 2.8), max: Vec3::new(-2.8, 0.0, 3.2), material: LAVA },  // Esquina superior izquierda
-     Cube { min: Vec3::new(2.8, -0.5, 2.8), max: Vec3::new(3.2, 0.0, 3.2), material: LAVA },   // Esquina superior derecha
+        // lava en las esquinas de la base
+        Cube { min: Vec3::new(-3.2, -0.5, -3.2), max: Vec3::new(-2.8, 0.0, -2.8), material: lava.clone() }, // Esquina inferior izquierda
+        Cube { min: Vec3::new(2.8, -0.5, -3.2), max: Vec3::new(3.2, 0.0, -2.8), material: lava.clone() },  // Esquina inferior derecha
+        Cube { min: Vec3::new(-3.2, -0.5, 2.8), max: Vec3::new(-2.8, 0.0, 3.2), material: lava.clone() },  // Esquina superior izquierda
+        Cube { min: Vec3::new(2.8, -0.5, 2.8), max: Vec3::new(3.2, 0.0, 3.2), material: lava.clone() },   // Esquina superior derecha
 
-     // Portal (marco) desplazado hacia arriba en delta_y y hacia adelante en delta_z
-    // Lados verticales del marco
-    Cube { min: Vec3::new(-1.0, 0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(-0.5, 2.5 + delta_y, -0.5 + delta_z), material: OBSIDIAN }, // Izquierda
-    Cube { min: Vec3::new(0.5, 0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 2.5 + delta_y, -0.5 + delta_z), material: OBSIDIAN },  // Derecha
-    
-    // Lados horizontales del marco
-    Cube { min: Vec3::new(-1.0, 2.5 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 3.0 + delta_y, -0.5 + delta_z), material: OBSIDIAN }, // Arriba
-    Cube { min: Vec3::new(-1.0, -0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 0.2 + delta_y, -0.5 + delta_z), material: OBSIDIAN }, // Abajo
+        // Portal (marco) desplazado hacia arriba en delta_y y hacia adelante en delta_z
+        // Lados verticales del marco
+        Cube { min: Vec3::new(-1.0, 0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(-0.5, 2.5 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() }, // Izquierda
+        Cube { min: Vec3::new(0.5, 0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 2.5 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() },  // Derecha
+        
+        // Lados horizontales del marco
+        Cube { min: Vec3::new(-1.0, 2.5 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 3.0 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() }, // Arriba
+        Cube { min: Vec3::new(-1.0, -0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 0.2 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() }, // Abajo
 
-    // Interior del portal desplazado hacia arriba y hacia adelante
-    Cube { 
-        min: Vec3::new(-0.5, 0.2 + delta_y, -1.5 + delta_z), 
-        max: Vec3::new(0.5, 2.5 + delta_y, -0.5 + delta_z), 
-        material: PURPLE 
-    }, // Interior morado ajustado
-    
+        // Columna izquierda del portal
+        Cube { 
+            min: Vec3::new(-0.5, 0.2 + delta_y, -1.5 + delta_z), 
+            max: Vec3::new(0.0, 2.5 + delta_y, -0.5 + delta_z), 
+            material: purple_material.clone() 
+        },
+        // Columna derecha del portal
+        Cube { 
+            min: Vec3::new(0.0, 0.2 + delta_y, -1.5 + delta_z), 
+            max: Vec3::new(0.5, 2.5 + delta_y, -0.5 + delta_z), 
+            material: purple_material 
+        },
+        // Gradas desde un extremo al otro de la base verde
+        Cube { min: Vec3::new(-2.4, -0.3, -2.4), max: Vec3::new(2.4, -0.1, 3.1), material: rock.clone() },
+        Cube { min: Vec3::new(-2.3, -0.1, -2.3), max: Vec3::new(2.3, 0.1, 2.9), material: rock.clone() }, 
+        Cube { min: Vec3::new(-2.2, 0.1, -2.2), max: Vec3::new(2.2, 0.3, 2.7), material: rock.clone() },  
+        Cube { min: Vec3::new(-2.1, 0.3, -2.1), max: Vec3::new(2.1, 0.5, 2.5), material: rock.clone() },  
+        Cube { min: Vec3::new(-2.0, 0.5, -2.0), max: Vec3::new(2.0, 0.7, 2.3), material: rock.clone() }, 
+        Cube { min: Vec3::new(-1.9, 0.7, -1.9), max: Vec3::new(1.9, 0.9, 2.1), material: rock.clone() },  
+        Cube { min: Vec3::new(-1.8, 0.9, -1.8), max: Vec3::new(1.8, 1.1, 2.0), material: rock.clone() }, 
+        Cube { min: Vec3::new(-1.7, 1.1, -1.7), max: Vec3::new(1.7, 1.3, 1.8), material: rock.clone() },  
 
-    // Gradas desde un extremo al otro de la base verde
-    Cube { min: Vec3::new(-2.4, -0.3, -2.4), max: Vec3::new(2.4, -0.1, 3.1), material: ROCK },
-    Cube { min: Vec3::new(-2.3, -0.1, -2.3), max: Vec3::new(2.3, 0.1, 2.9), material: ROCK },  // Tercer escalón
-    Cube { min: Vec3::new(-2.2, 0.1, -2.2), max: Vec3::new(2.2, 0.3, 2.7), material: ROCK },   // Cuarto escalón
-    Cube { min: Vec3::new(-2.1, 0.3, -2.1), max: Vec3::new(2.1, 0.5, 2.5), material: ROCK },   // Quinto escalón
-    Cube { min: Vec3::new(-2.0, 0.5, -2.0), max: Vec3::new(2.0, 0.7, 2.3), material: ROCK },   // Sexto escalón
-    Cube { min: Vec3::new(-1.9, 0.7, -1.9), max: Vec3::new(1.9, 0.9, 2.1), material: ROCK },   // Séptimo escalón
-    Cube { min: Vec3::new(-1.8, 0.9, -1.8), max: Vec3::new(1.8, 1.1, 2.0), material: ROCK },   // Octavo escalón
-    Cube { min: Vec3::new(-1.7, 1.1, -1.7), max: Vec3::new(1.7, 1.3, 1.8), material: ROCK },   // Noveno escalón
-
-];
+    ];
 
     // Inicializa la cámara
     let mut camera = Camera::new(
-        Vec3::new(0.0, 0.0, 6.5),  // posición inicial de la cámara
+        Vec3::new(0.0, 0.0, -6.5),  // posición inicial de la cámara
         Vec3::new(0.0, 0.0, 0.0),  // punto al que la cámara está mirando (origen)
-        Vec3::new(0.0, 1.0, 0.0)   // vector hacia arriba del mundo
+        Vec3::new(0.0, 5.0, 0.0)   // vector hacia arriba del mundo
     );
+
     let rotation_speed = PI / 50.0;
     let zoom_speed = 0.5;
     const MAX_ZOOM: f32 = 1.0;
     const MIN_ZOOM: f32 = 10.0;
+    const ZOOM_SPEED: f32 = 0.1;
 
     while window.is_open() {
         // Escuchar entradas
@@ -332,21 +391,14 @@ let objects = [
 
         // Si presionas la tecla W, la cámara se acerca
         if window.is_key_down(Key::W) {
-            if camera.eye.z - zoom_speed > MAX_ZOOM {
-                camera.eye.z -= zoom_speed;
-            } else {
-                camera.eye.z = MAX_ZOOM;
-            }
+            camera.eye.z = (camera.eye.z - ZOOM_SPEED).max(MAX_ZOOM);
         }
-    
+
         // Si presionas la tecla S, la cámara se aleja
         if window.is_key_down(Key::S) {
-            if camera.eye.z + zoom_speed < MIN_ZOOM {
-                camera.eye.z += zoom_speed;
-            } else {
-                camera.eye.z = MIN_ZOOM;
-            }
+            camera.eye.z = (camera.eye.z + ZOOM_SPEED).min(MIN_ZOOM);
         }
+
         // Controles de órbita de la cámara
         if window.is_key_down(Key::Left) {
             camera.orbit(rotation_speed, 0.0);
