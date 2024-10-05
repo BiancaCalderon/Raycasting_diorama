@@ -325,16 +325,14 @@ fn main() {
             Ok(texture) => texture,
             Err(e) => {
                 eprintln!("Error al cargar la textura {}: {}", file_path, e);
-                // Aquí podrías devolver una textura por defecto o pánico, dependiendo de tus necesidades
                 panic!("No se pudo cargar la textura");
             }
         }
     }
 
-    let obsidian_texture  = load_texture("assets/obsidian.jpg"); // Carga la textura de obsidiana
-    let purple_texture  = load_texture("assets/purple.jpg"); // Carga la textura púrpura
+    let obsidian_texture  = load_texture("assets/obsidian.jpg");
+    let purple_texture  = load_texture("assets/purple.jpg");
     let grass_texture = load_texture("assets/grass.jpg");
-    //let lava_texture = load_texture("assets/lava.jpg");
 
     let obsidian_material = Material::with_texture(
         obsidian_texture, // Texture para obsidian
@@ -390,14 +388,14 @@ fn main() {
     // Ajustar la luz
     let mut light = SceneLight::new(Vec3::new(0.75, 0.25, -2.0), Color::new(255, 200, 100), 2.0);
 
-    let delta_y = 0.703125; // Aumentado un 25% adicional
-    let delta_z = 0.46875;  // Aumentado un 25% adicional
+    let delta_y = 0.703125;
+    let delta_z = 0.46875;
 
     let objects = [
-        // Base con césped (aumentada)
+        // Base con césped
         Cube { min: Vec3::new(-1.40625, -0.234375, -1.40625), max: Vec3::new(1.40625, -0.09375, 1.40625), material: grass },
 
-        // Lava en las esquinas de la base (aumentada)
+        // Lava en las esquinas de la base
         Cube { min: Vec3::new(-1.5, -0.234375, -1.5), max: Vec3::new(-1.3125, 0.0, -1.3125), material: lava.clone() },
         Cube { min: Vec3::new(1.3125, -0.234375, -1.5), max: Vec3::new(1.5, 0.0, -1.3125), material: lava.clone() },
         Cube { min: Vec3::new(-1.5, -0.234375, 1.3125), max: Vec3::new(-1.3125, 0.0, 1.5), material: lava.clone() },
