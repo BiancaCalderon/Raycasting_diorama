@@ -304,8 +304,8 @@ pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, 
 fn main() {
     let window_width = 800;
     let window_height = 600;
-    let framebuffer_width = 800;
-    let framebuffer_height = 600;
+    let framebuffer_width = 400;
+    let framebuffer_height = 300;
     let frame_delay = Duration::from_millis(16);
 
     let mut framebuffer = Framebuffer::new(framebuffer_width, framebuffer_height);

@@ -1,5 +1,7 @@
 use image::{DynamicImage, GenericImageView, Rgba};
 use crate::color::Color;
+use std::collections::HashMap;
+use std::io::Error as IoError;
 
 #[derive(Clone, Debug)]
 pub struct Texture {
@@ -36,5 +38,25 @@ impl Texture {
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+}
+
+pub struct TextureCache {
+    textures: HashMap<String, Texture>,
+}
+
+impl TextureCache {
+    pub fn new() -> Self {
+        Self {
+            textures: HashMap::new(),
+        }
+    }
+
+    pub fn get_or_load(&mut self, file_path: &str) -> Result<&Texture, std::io::Error> {
+        if !self.textures.contains_key(file_path) {
+            let texture = Texture::new(file_path).map_err(|e| IoError::new(std::io::ErrorKind::Other, e))?;
+            self.textures.insert(file_path.to_string(), texture);
+        }
+        Ok(self.textures.get(file_path).unwrap())
     }
 }
