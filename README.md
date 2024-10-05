@@ -65,3 +65,10 @@ Ejecuta el programa con:
 Puedes modificar la escena ajustando los objetos, materiales y luces en la función `main()`. También puedes cambiar las texturas cargando nuevos archivos de imagen en la carpeta `assets/`.
 
 Enlace del proyecto: https://github.com/tu-usuario/raytracer-rust
+
+## Demostración
+
+
+https://github.com/user-attachments/assets/5c0e4a7b-ba0c-4426-830a-4b2c7c840532
+
+
