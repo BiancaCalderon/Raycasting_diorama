@@ -27,6 +27,54 @@ extern crate image;
 const ORIGIN_BIAS: f32 = 1e-4;
 const SKYBOX_COLOR: Color = Color::new(68, 142, 228);
 
+// Añade estas constantes
+const DAY_DURATION: f32 = 10.0; // Duración del día en segundos
+const NIGHT_SKY_COLOR: Color = Color::new(10, 10, 50); // Color del cielo nocturno
+
+// Modifica la estructura Light para incluir el ciclo día/noche
+struct SceneLight {
+    position: Vec3,
+    color: Color,
+    intensity: f32,
+    time: f32,
+}
+
+impl SceneLight {
+    fn new(position: Vec3, color: Color, intensity: f32) -> Self {
+        Self {
+            position,
+            color,
+            intensity,
+            time: 0.0,
+        }
+    }
+
+    fn update(&mut self, delta_time: f32) {
+        self.time += delta_time;
+        if self.time > DAY_DURATION {
+            self.time -= DAY_DURATION;
+        }
+
+        let angle = 2.0 * PI * (self.time / DAY_DURATION);
+        
+        // Actualiza la posición de la luz
+        self.position = Vec3::new(
+            0.75 * angle.cos(),
+            0.25 + 2.0 * angle.sin(),
+            -2.0
+        );
+
+        // Actualiza el color y la intensidad de la luz
+        let t = (angle.sin() + 1.0) / 2.0; // Normaliza entre 0 y 1
+        self.color = Color::new(
+            (255.0 * t) as u8,
+            (200.0 * t) as u8,
+            (100.0 * t) as u8
+        );
+        self.intensity = 1.0 + t;
+    }
+}
+
 fn offset_origin(intersect: &Intersect, direction: &Vec3) -> Vec3 {
     let offset = intersect.normal * ORIGIN_BIAS;
     if direction.dot(&intersect.normal) < 0.0 {
@@ -69,7 +117,7 @@ fn refract(incident: &Vec3, normal: &Vec3, eta_t: f32) -> Vec3 {
 
 fn cast_shadow(
     intersect: &Intersect,
-    light: &Light,
+    light: &SceneLight,
     objects: &[Cube],
 ) -> f32 {
     let light_dir = (light.position - intersect.point).normalize();
@@ -90,15 +138,17 @@ fn cast_shadow(
     shadow_intensity
 }
 
-pub fn cast_ray(
+// Modifica la función cast_ray para usar el color del cielo variable
+fn cast_ray(
     ray_origin: &Vec3,
     ray_direction: &Vec3,
     objects: &[Cube],
-    light: &Light,
+    light: &SceneLight,
     depth: u32,
+    sky_color: Color,
 ) -> Color {
     if depth > 3 {
-        return SKYBOX_COLOR;
+        return sky_color;
     }
 
     let mut intersect = Intersect::empty();
@@ -113,8 +163,11 @@ pub fn cast_ray(
     }
 
     if !intersect.is_intersecting {
-        return SKYBOX_COLOR;
+        return sky_color;
     }
+
+    // Añadir la emisión del material al color base
+    let emission = intersect.material.emission;
 
     fn calculate_uv(intersect: &Intersect) -> (f64, f64) {
         // Determinar qué cara del cubo estamos renderizando
@@ -158,7 +211,7 @@ pub fn cast_ray(
 
     // Calcular el color base
     let base_color = if has_texture {
-        material_color // Usar el color de la textura sin modificar
+        material_color + emission // Añadir emisión
     } else {
         // Aplicar iluminación solo para materiales sin textura
         let diffuse_intensity = intersect.normal.dot(&light_dir).max(0.0).min(1.0);
@@ -167,7 +220,7 @@ pub fn cast_ray(
         let specular_intensity = view_dir.dot(&reflect_dir).max(0.0).powf(intersect.material.shininess);
         let specular = light.color * intersect.material.properties[1] * specular_intensity * light_intensity;
         
-        diffuse + specular
+        diffuse + specular + emission // Añadir emisión
     };
 
     // Reflected color
@@ -176,7 +229,7 @@ pub fn cast_ray(
     if reflectivity > 0.0 {
         let reflect_dir = reflect(&ray_direction, &intersect.normal).normalize();
         let reflect_origin = offset_origin(&intersect, &reflect_dir);
-        reflect_color = cast_ray(&reflect_origin, &reflect_dir, objects, light, depth + 1);
+        reflect_color = cast_ray(&reflect_origin, &reflect_dir, objects, light, depth + 1, sky_color);
     }
     
     // Refracted color
@@ -185,7 +238,7 @@ pub fn cast_ray(
     if transparency > 0.0 {
         let refract_dir = refract(&ray_direction, &intersect.normal, intersect.material.refractive_index);
         let refract_origin = offset_origin(&intersect, &refract_dir);
-        refract_color = cast_ray(&refract_origin, &refract_dir, objects, light, depth + 1);
+        refract_color = cast_ray(&refract_origin, &refract_dir, objects, light, depth + 1, sky_color);
     }
     
     // Combinar los colores
@@ -197,7 +250,8 @@ pub fn cast_ray(
 
 }
 
-pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, light: &Light) {
+// Modifica la función render para pasar el color del cielo
+pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, light: &SceneLight, sky_color: Color) {
     let width = framebuffer.width as f32;
     let height = framebuffer.height as f32;
     let aspect_ratio = width / height;
@@ -230,7 +284,7 @@ pub fn render(framebuffer: &mut Framebuffer, objects: &[Cube], camera: &Camera, 
             let rotated_direction = camera.basis_change(&ray_direction);
 
 
-            let pixel_color = cast_ray(&camera.eye, &rotated_direction, objects, light, 0);
+            let pixel_color = cast_ray(&camera.eye, &rotated_direction, objects, light, 0, sky_color);
 
 
             // Asigna el color calculado en el buffer de píxeles
@@ -280,6 +334,7 @@ fn main() {
     let obsidian_texture  = load_texture("assets/obsidian.jpg"); // Carga la textura de obsidiana
     let purple_texture  = load_texture("assets/purple.jpg"); // Carga la textura púrpura
     let grass_texture = load_texture("assets/grass.jpg");
+    //let lava_texture = load_texture("assets/lava.jpg");
 
     let obsidian_material = Material::with_texture(
         obsidian_texture, // Texture para obsidian
@@ -299,7 +354,7 @@ fn main() {
     // Define el material de césped
     let grass = Material::with_texture(
         grass_texture,  // Color verde
-        50.0,                   // Ajuste el brillo si es necesario
+        10.0,                   // Ajuste el brillo si es necesario
         [0.8, 0.2, 0.0, 0.0],   // Ajusta las propiedades: difuso, especular, reflectividad, transparencia
         1.0
     );
@@ -313,75 +368,82 @@ fn main() {
     );
 
     // Material para lava
-    let lava: Material = Material::new(
-        Color::new(255, 69, 0), // Color naranja brillante (lava)
-        100.0,                   // Ajuste el brillo
-        [0.9, 0.3, 0.0, 0.5],   // Propiedades: difuso, especular, reflectividad, transparencia
-        0.0                     // Otras propiedades si es necesario
+    let lava_texture = match Texture::new("assets/lava.jpg") {
+        Ok(texture) => texture,
+        Err(e) => {
+            eprintln!("Error al cargar la textura de lava: {}", e);
+            panic!("No se pudo cargar la textura de lava");
+        }
+    };
+
+    let mut lava = Material::with_texture(
+        lava_texture,
+        0.0,                // shininess (brillo)
+        [0.9, 0.3, 0.0, 0.5], // propiedades: difuso, especular, reflectividad, transparencia
+        1.0                 // índice de refracción
     );
 
-    
-    // Agregar una luz
-    let light = Light::new(Vec3::new(1.5, 0.5, -4.0), Color::new(255, 200, 100), 2.0);
+    // Añadir emisión al material de lava
+    lava.emission = Color::new(255, 128, 0); // Color de emisión naranja (usando valores u8)
 
-    let delta_y = 1.5; // Desplazamiento del portal hacia arriba
-    let delta_z = 1.0; // Desplazamiento del portal hacia adelante
+    
+    // Ajustar la luz
+    let mut light = SceneLight::new(Vec3::new(0.75, 0.25, -2.0), Color::new(255, 200, 100), 2.0);
+
+    let delta_y = 0.703125; // Aumentado un 25% adicional
+    let delta_z = 0.46875;  // Aumentado un 25% adicional
 
     let objects = [
-        // Base con césped (desplazada hacia abajo)
-        Cube { min: Vec3::new(-3.0, -0.5, -3.0), max: Vec3::new(3.0, -0.2, 3.0), material: grass }, // Base de césped
+        // Base con césped (aumentada)
+        Cube { min: Vec3::new(-1.40625, -0.234375, -1.40625), max: Vec3::new(1.40625, -0.09375, 1.40625), material: grass },
 
-        // lava en las esquinas de la base
-        Cube { min: Vec3::new(-3.2, -0.5, -3.2), max: Vec3::new(-2.8, 0.0, -2.8), material: lava.clone() }, // Esquina inferior izquierda
-        Cube { min: Vec3::new(2.8, -0.5, -3.2), max: Vec3::new(3.2, 0.0, -2.8), material: lava.clone() },  // Esquina inferior derecha
-        Cube { min: Vec3::new(-3.2, -0.5, 2.8), max: Vec3::new(-2.8, 0.0, 3.2), material: lava.clone() },  // Esquina superior izquierda
-        Cube { min: Vec3::new(2.8, -0.5, 2.8), max: Vec3::new(3.2, 0.0, 3.2), material: lava.clone() },   // Esquina superior derecha
+        // Lava en las esquinas de la base (aumentada)
+        Cube { min: Vec3::new(-1.5, -0.234375, -1.5), max: Vec3::new(-1.3125, 0.0, -1.3125), material: lava.clone() },
+        Cube { min: Vec3::new(1.3125, -0.234375, -1.5), max: Vec3::new(1.5, 0.0, -1.3125), material: lava.clone() },
+        Cube { min: Vec3::new(-1.5, -0.234375, 1.3125), max: Vec3::new(-1.3125, 0.0, 1.5), material: lava.clone() },
+        Cube { min: Vec3::new(1.3125, -0.234375, 1.3125), max: Vec3::new(1.5, 0.0, 1.5), material: lava.clone() },
 
-        // Portal (marco) desplazado hacia arriba en delta_y y hacia adelante en delta_z
-        // Lados verticales del marco
-        Cube { min: Vec3::new(-1.0, 0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(-0.5, 2.5 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() }, // Izquierda
-        Cube { min: Vec3::new(0.5, 0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 2.5 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() },  // Derecha
-        
-        // Lados horizontales del marco
-        Cube { min: Vec3::new(-1.0, 2.5 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 3.0 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() }, // Arriba
-        Cube { min: Vec3::new(-1.0, -0.2 + delta_y, -1.5 + delta_z), max: Vec3::new(1.0, 0.2 + delta_y, -0.5 + delta_z), material: obsidian_material.clone() }, // Abajo
+        // Portal (marco)
+        Cube { min: Vec3::new(-0.46875, 0.09375 + delta_y, -0.703125 + delta_z), max: Vec3::new(-0.234375, 1.171875 + delta_y, -0.234375 + delta_z), material: obsidian_material.clone() },
+        Cube { min: Vec3::new(0.234375, 0.09375 + delta_y, -0.703125 + delta_z), max: Vec3::new(0.46875, 1.171875 + delta_y, -0.234375 + delta_z), material: obsidian_material.clone() },
+        Cube { min: Vec3::new(-0.46875, 1.171875 + delta_y, -0.703125 + delta_z), max: Vec3::new(0.46875, 1.40625 + delta_y, -0.234375 + delta_z), material: obsidian_material.clone() },
+        Cube { min: Vec3::new(-0.46875, -0.09375 + delta_y, -0.703125 + delta_z), max: Vec3::new(0.46875, 0.09375 + delta_y, -0.234375 + delta_z), material: obsidian_material.clone() },
 
-        // Columna izquierda del portal
+        // Columnas del portal
         Cube { 
-            min: Vec3::new(-0.5, 0.2 + delta_y, -1.5 + delta_z), 
-            max: Vec3::new(0.0, 2.5 + delta_y, -0.5 + delta_z), 
+            min: Vec3::new(-0.234375, 0.09375 + delta_y, -0.703125 + delta_z), 
+            max: Vec3::new(0.0, 1.171875 + delta_y, -0.234375 + delta_z), 
             material: purple_material.clone() 
         },
-        // Columna derecha del portal
         Cube { 
-            min: Vec3::new(0.0, 0.2 + delta_y, -1.5 + delta_z), 
-            max: Vec3::new(0.5, 2.5 + delta_y, -0.5 + delta_z), 
+            min: Vec3::new(0.0, 0.09375 + delta_y, -0.703125 + delta_z), 
+            max: Vec3::new(0.234375, 1.171875 + delta_y, -0.234375 + delta_z), 
             material: purple_material 
         },
-        // Gradas desde un extremo al otro de la base verde
-        Cube { min: Vec3::new(-2.4, -0.3, -2.4), max: Vec3::new(2.4, -0.1, 3.1), material: rock.clone() },
-        Cube { min: Vec3::new(-2.3, -0.1, -2.3), max: Vec3::new(2.3, 0.1, 2.9), material: rock.clone() }, 
-        Cube { min: Vec3::new(-2.2, 0.1, -2.2), max: Vec3::new(2.2, 0.3, 2.7), material: rock.clone() },  
-        Cube { min: Vec3::new(-2.1, 0.3, -2.1), max: Vec3::new(2.1, 0.5, 2.5), material: rock.clone() },  
-        Cube { min: Vec3::new(-2.0, 0.5, -2.0), max: Vec3::new(2.0, 0.7, 2.3), material: rock.clone() }, 
-        Cube { min: Vec3::new(-1.9, 0.7, -1.9), max: Vec3::new(1.9, 0.9, 2.1), material: rock.clone() },  
-        Cube { min: Vec3::new(-1.8, 0.9, -1.8), max: Vec3::new(1.8, 1.1, 2.0), material: rock.clone() }, 
-        Cube { min: Vec3::new(-1.7, 1.1, -1.7), max: Vec3::new(1.7, 1.3, 1.8), material: rock.clone() },  
 
+        // Gradas
+        Cube { min: Vec3::new(-1.125, -0.140625, -1.125), max: Vec3::new(1.125, -0.046875, 1.453125), material: rock.clone() },
+        Cube { min: Vec3::new(-1.078125, -0.046875, -1.078125), max: Vec3::new(1.078125, 0.046875, 1.359375), material: rock.clone() }, 
+        Cube { min: Vec3::new(-1.03125, 0.046875, -1.03125), max: Vec3::new(1.03125, 0.140625, 1.265625), material: rock.clone() },  
+        Cube { min: Vec3::new(-0.984375, 0.140625, -0.984375), max: Vec3::new(0.984375, 0.234375, 1.171875), material: rock.clone() },  
+        Cube { min: Vec3::new(-0.9375, 0.234375, -0.9375), max: Vec3::new(0.9375, 0.328125, 1.078125), material: rock.clone() }, 
+        Cube { min: Vec3::new(-0.890625, 0.328125, -0.890625), max: Vec3::new(0.890625, 0.421875, 0.984375), material: rock.clone() },  
+        Cube { min: Vec3::new(-0.84375, 0.421875, -0.84375), max: Vec3::new(0.84375, 0.515625, 0.890625), material: rock.clone() }, 
+        Cube { min: Vec3::new(-0.796875, 0.515625, -0.796875), max: Vec3::new(0.796875, 0.609375, 0.75), material: rock.clone() },  
     ];
 
-    // Inicializa la cámara
+    // Inicializa la cámara con una posición más lejana para compensar el aumento de tamaño
     let mut camera = Camera::new(
-        Vec3::new(0.0, 0.0, -6.5),  // posición inicial de la cámara
+        Vec3::new(0.0, 0.0, 5.5),
         Vec3::new(0.0, 0.0, 0.0),  // punto al que la cámara está mirando (origen)
-        Vec3::new(0.0, 5.0, 0.0)   // vector hacia arriba del mundo
+        Vec3::new(0.0, 1.0, 0.0)   // vector hacia arriba del mundo
     );
 
     let rotation_speed = PI / 50.0;
-    let zoom_speed = 0.5;
-    const MAX_ZOOM: f32 = 1.0;
-    const MIN_ZOOM: f32 = 10.0;
-    const ZOOM_SPEED: f32 = 0.1;
+
+    const ZOOM_SPEED: f32 = 0.05;  // Reducido para un control más fino
+
+    let mut last_update = std::time::Instant::now();
 
     while window.is_open() {
         // Escuchar entradas
@@ -391,12 +453,14 @@ fn main() {
 
         // Si presionas la tecla W, la cámara se acerca
         if window.is_key_down(Key::W) {
-            camera.eye.z = (camera.eye.z - ZOOM_SPEED).max(MAX_ZOOM);
+            let forward = (camera.center - camera.eye).normalize();
+            camera.eye += forward * ZOOM_SPEED;
         }
 
         // Si presionas la tecla S, la cámara se aleja
         if window.is_key_down(Key::S) {
-            camera.eye.z = (camera.eye.z + ZOOM_SPEED).min(MIN_ZOOM);
+            let backward = (camera.eye - camera.center).normalize();
+            camera.eye += backward * ZOOM_SPEED;
         }
 
         // Controles de órbita de la cámara
@@ -413,8 +477,22 @@ fn main() {
             camera.orbit(0.0, rotation_speed);
         }
 
-        // Dibuja los objetos
-        render(&mut framebuffer, &objects, &camera, &light);
+        // Actualiza la luz y calcula el color del cielo
+        let now = std::time::Instant::now();
+        let delta_time = (now - last_update).as_secs_f32();
+        last_update = now;
+
+        light.update(delta_time);
+
+        let t = (light.position.y + 2.0) / 4.0; // Normaliza entre 0 y 1
+        let sky_color = Color::new(
+            (SKYBOX_COLOR.red() as f32 * t + NIGHT_SKY_COLOR.red() as f32 * (1.0 - t)) as u8,
+            (SKYBOX_COLOR.green() as f32 * t + NIGHT_SKY_COLOR.green() as f32 * (1.0 - t)) as u8,
+            (SKYBOX_COLOR.blue() as f32 * t + NIGHT_SKY_COLOR.blue() as f32 * (1.0 - t)) as u8,
+        );
+
+        // Dibuja los objetos con el nuevo color del cielo
+        render(&mut framebuffer, &objects, &camera, &light, sky_color);
 
         // Actualiza la ventana con el contenido del framebuffer
         window

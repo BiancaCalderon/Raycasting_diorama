@@ -13,6 +13,18 @@ impl Color {
         Color { r, g, b }
     }
 
+    pub fn red(&self) -> u8 {
+        self.r
+    }
+
+    pub fn green(&self) -> u8 {
+        self.g
+    }
+
+    pub fn blue(&self) -> u8 {
+        self.b
+    }
+
     // Function to create a color from a hex value
     pub const fn from_hex(hex: u32) -> Self {
         let r = ((hex >> 16) & 0xFF) as u8;
@@ -23,6 +35,10 @@ impl Color {
 
     pub const fn black() -> Self {
         Color { r: 0, g: 0, b: 0 }
+    }
+
+    pub const fn white() -> Self {
+        Color { r: 255, g: 255, b: 255 }
     }
 
     // Function to return the color as a hex value

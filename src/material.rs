@@ -4,20 +4,22 @@ use crate::texture::Texture;
 #[derive(Clone, Debug)]
 pub struct Material {
     pub color: Color,
+    pub texture: Option<Texture>,
     pub shininess: f32,
     pub properties: [f32; 4],
     pub refractive_index: f32,
-    pub texture: Option<Texture>,
+    pub emission: Color, // Nueva propiedad para la emisividad
 }
 
 impl Material {
     pub fn new(color: Color, shininess: f32, properties: [f32; 4], refractive_index: f32) -> Self {
         Material {
             color,
+            texture: None,
             shininess,
             properties,
             refractive_index,
-            texture: None,
+            emission: Color::black(), // Por defecto, no emite luz
         }
     }
  
@@ -29,16 +31,30 @@ impl Material {
             properties: [0.0, 0.0, 0.0, 0.0], // Default properties (all set to 0)
             refractive_index: 1.0, 
             texture: None,         // Default refractive index (e.g., for air)
+            emission: Color::black(), // Por defecto, no emite luz
         }
     }
 
     pub fn with_texture(texture: Texture, shininess: f32, properties: [f32; 4], refractive_index: f32) -> Self {
         Material {
-            color: Color::new(255, 255, 255), // Color base blanco
+            color: Color::white(),
+            texture: Some(texture),
             shininess,
             properties,
             refractive_index,
-            texture: Some(texture),
+            emission: Color::black(), // Por defecto, no emite luz
+        }
+    }
+
+    // Nuevo método para crear materiales emisivos
+    pub fn with_emission(color: Color, shininess: f32, properties: [f32; 4], refractive_index: f32, emission: Color) -> Self {
+        Material {
+            color,
+            texture: None,
+            shininess,
+            properties,
+            refractive_index,
+            emission,
         }
     }
 
